@@ -1,0 +1,11 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+torch==2.2.2
+transformers==4.38.2
+pillow
+pytesseract
+boto3
+numpy<2
+redis==5.0.1
+requests
+pdf2image

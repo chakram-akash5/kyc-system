@@ -1,0 +1,108 @@
+services:
+  gateway:
+    build: ./gateway
+    container_name: gateway
+    ports:
+      - "8000:8000"
+    depends_on:
+      - queue-init
+      - redis
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - SQS_ENDPOINT=http://localstack:4566
+      - S3_ENDPOINT=http://localstack:4566
+      - INPUT_QUEUE=kyc-raw-queue
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - S3_BUCKET=kyc-documents
+    restart: always
+
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack
+    environment:
+      - SERVICES=sqs,s3
+      - AWS_DEFAULT_REGION=us-east-1
+    ports:
+      - "4566:4566"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+
+  queue-init:
+    image: amazon/aws-cli
+    depends_on:
+      - localstack
+    environment:
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name kyc-raw-queue;
+      aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name kyc-extracted-queue;
+      aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name kyc-validated-queue;
+      aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name kyc-scored-queue;
+      aws --endpoint-url=http://localstack:4566 sqs create-queue --queue-name kyc-dlq;
+      aws --endpoint-url=http://localstack:4566 s3 mb s3://kyc-documents;
+      echo 'Queues and bucket created';
+      "
+
+  extraction-service:
+    build: ./services/extraction-service
+    container_name: extraction-service
+    depends_on:
+      - queue-init
+      - redis
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - INPUT_QUEUE=kyc-raw-queue
+      - OUTPUT_QUEUE=kyc-extracted-queue
+      - DLQ_QUEUE=kyc-dlq
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - S3_ENDPOINT=http://localstack:4566
+      - S3_BUCKET=kyc-documents
+    restart: always
+
+  validation-service:
+    build: ./services/validation-service
+    container_name: validation-service
+    depends_on:
+      - queue-init
+      - redis
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - INPUT_QUEUE=kyc-extracted-queue
+      - OUTPUT_QUEUE=kyc-validated-queue
+      - DLQ_QUEUE=kyc-dlq
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    restart: always
+
+  scoring-service:
+    build: ./services/scoring-service
+    container_name: scoring-service
+    depends_on:
+      - queue-init
+      - redis
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - INPUT_QUEUE=kyc-validated-queue
+      - OUTPUT_QUEUE=kyc-scored-queue
+      - DLQ_QUEUE=kyc-dlq
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    restart: always
