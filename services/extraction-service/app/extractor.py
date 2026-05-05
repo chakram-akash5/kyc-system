@@ -44,30 +44,63 @@ def extract_dob(text: str) -> str:
 
 
 def extract_name(text: str) -> str:
-    # Pattern 1: After "To\n" (Aadhaar address block)
-    match = re.search(r'(?:^|\n)To\s*\n([A-Z][a-zA-Z\s]{2,40})', text)
-    if match:
-        return match.group(1).strip()
-
-    # Pattern 2: After "Name" label (PAN card)
-    patterns = [
-        r'(?:Name|NAME)\s*[:/]?\s*([A-Z][a-zA-Z\s]{2,40})',
-        r'(?:नाम\s*/\s*Name)\s*([A-Z][a-zA-Z\s]{2,40})',
+    BLACKLIST = [
+        "INCOME", "TAX", "GOVERNMENT", "INDIA", "AUTHORITY",
+        "DEPARTMENT", "AADHAAR", "UNIQUE", "PERMANENT", "S/O",
+        "C/O", "DOB", "DATE", "MALE", "FEMALE", "ENROLLMENT",
+        "ENROLMENT", "INFORMATION", "IDENTIFICATION", "SIGNATURE",
+        "DISTRICT", "KOLKATA", "BENGAL", "JHARKHAND", "ADDRESS",
+        "MOBILE", "STATE", "PIN", "CODE", "SUB", "VTC", "PO:"
     ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            name = match.group(1).strip()
-            if not any(word in name.upper() for word in [
-                "INCOME", "TAX", "GOVERNMENT", "INDIA", "AUTHORITY",
-                "DEPARTMENT", "AADHAAR", "UNIQUE", "PERMANENT"
-            ]):
-                return name
 
-    # Pattern 3: Look for "Debam Das" style — two capitalized words on a line
-    match = re.search(r'\n([A-Z][a-z]+\s[A-Z][a-z]+)\n', text)
+    def is_valid_name(n: str) -> bool:
+        n = n.strip()
+        if not n or len(n) < 3 or len(n) > 50:
+            return False
+        if any(word in n.upper() for word in BLACKLIST):
+            return False
+        if any(char.isdigit() for char in n):
+            return False
+        words = n.split()
+        if len(words) < 2:
+            return False
+        if not all(w[0].isupper() for w in words if w):
+            return False
+        return True
+
+    def clean(n: str) -> str:
+        return n.split('\n')[0].strip()
+
+    # Pattern 1: After "Name" label (PAN card)
+    match = re.search(r'(?:Name|NAME)\s*[:/]?\s*([A-Z][a-zA-Z\s]{2,40})', text)
     if match:
-        return match.group(1).strip()
+        name = clean(match.group(1))
+        if is_valid_name(name):
+            return name
+
+    # Pattern 2: Name before DOB on card strip
+    match = re.search(r'([A-Z][a-zA-Z\s]{2,40})\n[^\n]*(?:DOB\s*[:/]|जन्म\s*तिथि|Date\s*of\s*[Bb]irth)', text)
+    if match:
+        name = clean(match.group(1))
+        if is_valid_name(name):
+            return name
+
+    # Pattern 3: After "To" (case-insensitive) within next 3 lines
+    to_match = re.search(r'(?:^|\n)[Tt]o\s*\n((?:.*\n){0,3})', text)
+    if to_match:
+        block = to_match.group(1)
+        for line in block.split('\n'):
+            line = re.sub(r'^[^A-Z]+', '', line).strip()
+            if re.match(r'^[A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2}$', line):
+                if is_valid_name(line):
+                    return line
+
+    # Pattern 4: Scan every line for clean proper name
+    for line in text.split('\n'):
+        line = re.sub(r'^[^A-Z]+', '', line).strip()
+        if re.match(r'^[A-Z][a-z]+(?:\s[A-Z][a-z]+){1,2}$', line):
+            if is_valid_name(line):
+                return line
 
     return ""
 
